@@ -5,10 +5,10 @@ const LOW_STOCK_THRESHOLD = 5;
 const EXPIRY_SOON_DAYS = 30;
 const CURRENCY_DEFAULT = "PHP";
 
-/* ======= DEMO USERS (for real apps use a backend!) ======= */
+/* ======= DEMO USERS (for real apps use a backend) ======= */
 const USERS = [
-  { username: "admin",   password: "admin123",  role: "admin",   fullName: "Administrator" },
-  { username: "cashier", password: "cash123",   role: "cashier", fullName: "Cashier" },
+  { username: "admin",   password: "admin123", role: "admin",   fullName: "Administrator" },
+  { username: "cashier", password: "cash123",  role: "cashier", fullName: "Cashier" },
 ];
 
 /* ===================== HELPERS ===================== */
@@ -32,13 +32,13 @@ const isExpiringSoon = (iso) => !isExpired(iso) && daysUntil(iso) <= EXPIRY_SOON
 /* ===================== SAMPLE DATA ===================== */
 const sampleProducts = [
   { id: "BVG-001", name: "Bottled Water 500ml", price: 20, category: "Beverages", stock: 120, sku: "480000000001", expiry: "2026-12-31" },
-  { id: "BVG-002", name: "Iced Tea 330ml", price: 35, category: "Beverages", stock: 80,  sku: "480000000002", expiry: "2026-12-31" },
-  { id: "SNK-001", name: "Potato Chips 60g",   price: 55, category: "Snacks",    stock: 60,  sku: "480000000101", expiry: "2025-12-31" },
-  { id: "SNK-002", name: "Chocolate Bar",      price: 45, category: "Snacks",    stock: 65,  sku: "480000000102", expiry: "2025-11-30" },
-  { id: "PRC-001", name: "Toothpaste 100g",    price: 89, category: "Personal Care", stock: 50, sku: "480000000201", expiry: "2026-06-30" },
-  { id: "GRC-001", name: "Rice 1kg",           price: 68, category: "Grocery",   stock: 200, sku: "480000000301", expiry: "2026-03-31" },
-  { id: "GRC-002", name: "Eggs (dozen)",       price: 120,category: "Grocery",   stock: 30,  sku: "480000000302", expiry: "2025-10-20" },
-  { id: "GRC-003", name: "Cooking Oil 1L",     price: 175,category: "Grocery",   stock: 40,  sku: "480000000303", expiry: "2026-09-30" },
+  { id: "BVG-002", name: "Iced Tea 330ml",      price: 35, category: "Beverages", stock: 80,  sku: "480000000002", expiry: "2026-12-31" },
+  { id: "SNK-001", name: "Potato Chips 60g",    price: 55, category: "Snacks",    stock: 60,  sku: "480000000101", expiry: "2025-12-31" },
+  { id: "SNK-002", name: "Chocolate Bar",       price: 45, category: "Snacks",    stock: 65,  sku: "480000000102", expiry: "2025-11-30" },
+  { id: "PRC-001", name: "Toothpaste 100g",     price: 89, category: "Personal Care", stock: 50, sku: "480000000201", expiry: "2026-06-30" },
+  { id: "GRC-001", name: "Rice 1kg",            price: 68, category: "Grocery",   stock: 200, sku: "480000000301", expiry: "2026-03-31" },
+  { id: "GRC-002", name: "Eggs (dozen)",        price: 120,category: "Grocery",   stock: 30,  sku: "480000000302", expiry: "2025-10-20" },
+  { id: "GRC-003", name: "Cooking Oil 1L",      price: 175,category: "Grocery",   stock: 40,  sku: "480000000303", expiry: "2026-09-30" },
 ];
 
 /* ===================== STORAGE KEYS ===================== */
@@ -66,7 +66,7 @@ const Row = ({ label, value, bold }) => (
 );
 
 /* ===================== MAIN ===================== */
-export default function POSApp() {
+export default function App() {
   /* ---------- Auth ---------- */
   const [user, setUser] = useState(null); // {username, role, fullName}
   useEffect(() => {
@@ -204,17 +204,15 @@ export default function POSApp() {
     (paymentMethod !== "Cash" || Number(cashGiven) >= grandTotal);
 
   const completeSale = () => {
-    // 1) Deduct from inventory (NEVER below 0)
+    // Deduct inventory and persist
     const next = products.map((p) => {
       const item = cart.find((c) => c.id === p.id);
       if (!item) return p;
       const newStock = Math.max(0, (Number(p.stock) || 0) - (Number(item.qty) || 0));
       return { ...p, stock: newStock };
     });
-    // Update state + persist immediately
-    saveInventory(next);            // <-- ensures Inventory tab shows the deduction right away
+    saveInventory(next);
 
-    // 2) Build receipt
     const receipt = {
       id: `OR-${Date.now()}`,
       time: nowStr(),
@@ -232,13 +230,10 @@ export default function POSApp() {
       cashier: user?.fullName || "—",
     };
 
-    // 3) Reset cart & show receipt
     setLastReceipt(receipt);
     setShowCheckout(false);
     clearCart();
     setCashGiven(0);
-
-    // 4) Print (optional)
     setTimeout(() => printReceipt(), 40);
   };
 
@@ -267,16 +262,14 @@ export default function POSApp() {
   /* ---------- Views ---------- */
   const [view, setView] = useState("pos");
 
-  /* ---------- If not logged in, show login screen ---------- */
-  if (!user) {
-    return <LoginScreen onLogin={login} />;
-  }
+  /* ---------- Login Screen ---------- */
+  if (!user) return <LoginScreen onLogin={login} />;
 
   const isAdmin = user.role === "admin";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-indigo-50 via-white to-white dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100">
-      {/* ======= APP BAR ======= */}
+      {/* APP BAR */}
       <div className="sticky top-0 z-20 backdrop-blur supports-[backdrop-filter]:bg-white/70 dark:supports-[backdrop-filter]:bg-slate-900/60 border-b border-white/50 dark:border-slate-700">
         <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -334,7 +327,7 @@ export default function POSApp() {
         </div>
       </div>
 
-      {/* ======= STATUS BANNERS ======= */}
+      {/* STATUS BANNERS */}
       <div className="max-w-7xl mx-auto px-4 mt-4 grid gap-2">
         {expired.length > 0 && (
           <div className="p-3 rounded-2xl bg-red-50/80 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-200 text-sm shadow-sm">
@@ -354,7 +347,7 @@ export default function POSApp() {
         )}
       </div>
 
-      {/* ======= MAIN ======= */}
+      {/* MAIN */}
       {view === "pos" ? (
         <POSView
           products={products}
@@ -390,7 +383,7 @@ export default function POSApp() {
         <InventoryView products={products} saveInventory={saveInventory} />
       )}
 
-      {/* ======= CHECKOUT MODAL ======= */}
+      {/* CHECKOUT MODAL */}
       {showCheckout && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="w-full max-w-md rounded-2xl p-5 bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 shadow-2xl">
@@ -420,12 +413,12 @@ export default function POSApp() {
         </div>
       )}
 
-      {/* ======= PRINTABLE RECEIPT (HIDDEN) ======= */}
+      {/* PRINTABLE RECEIPT (HIDDEN) */}
       <div className="p-4">
         {lastReceipt && (
           <div className="max-w-sm mx-auto" ref={receiptRef}>
             <div className="center">
-              <div style={{ fontSize: 16, fontWeight: 700 }}>MNL Coffee Supplies RECEIPT</div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>MNL COFFEE SUPPLIES</div>
               <div className="muted">123 Demo St., Metro Manila</div>
               <div className="muted">TIN: 000-000-000-00000</div>
             </div>
@@ -635,12 +628,18 @@ function POSView(props) {
 }
 
 function InventoryView({ products, saveInventory }) {
+  const handleRemoveProduct = (id) => {
+    if (!confirm("Remove this item from inventory?")) return;
+    const next = products.filter(p => p.id !== id);
+    saveInventory(next);
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6">
       <div className="rounded-2xl p-4 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 shadow-lg shadow-indigo-500/5">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <h2 className="font-semibold">Inventory Monitor</h2>
+            <h2 className="font-semibold">Inventory</h2>
             <Badge tone="indigo">{products.length} items</Badge>
           </div>
           <button
@@ -650,17 +649,18 @@ function InventoryView({ products, saveInventory }) {
             Save
           </button>
         </div>
+
         <div className="overflow-auto">
           <table className="w-full text-sm">
             <thead className="text-left text-slate-500 dark:text-slate-400">
               <tr>
-                <th className="py-2 pr-2">ID / SKU</th>
                 <th className="py-2 pr-2">Name</th>
                 <th className="py-2 pr-2">Category</th>
                 <th className="py-2 pr-2">Price</th>
                 <th className="py-2 pr-2">Stock</th>
                 <th className="py-2 pr-2">Expiry</th>
-                <th className="py-2">Status</th>
+                <th className="py-2 pr-2">Status</th>
+                <th className="py-2 pr-2">Action</th>
               </tr>
             </thead>
             <tbody>
@@ -677,33 +677,65 @@ function InventoryView({ products, saveInventory }) {
                   status.startsWith("Expiring") ? "text-amber-700 dark:text-amber-300" :
                   status === "Low stock" ? "text-yellow-700 dark:text-yellow-300" :
                   "text-slate-500 dark:text-slate-400";
+
                 return (
                   <tr key={p.id} className="border-t border-slate-200 dark:border-slate-700">
-                    <td className="py-2 pr-2">{p.id}<div className="text-[11px] text-slate-400">SKU: {p.sku}</div></td>
                     <td className="py-2 pr-2">{p.name}</td>
                     <td className="py-2 pr-2">{p.category}</td>
                     <td className="py-2 pr-2">
-                      <input type="number" value={p.price} min={0}
-                        onChange={(e) => { const v = Number(e.target.value); const next = [...products]; next[idx] = { ...p, price: v }; saveInventory(next); }}
-                        className="w-24 rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"/>
+                      <input
+                        type="number"
+                        value={p.price}
+                        min={0}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          const next = [...products]; next[idx] = { ...p, price: v };
+                          saveInventory(next);
+                        }}
+                        className="w-24 rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
+                      />
                     </td>
                     <td className="py-2 pr-2">
-                      <input type="number" value={p.stock} min={0}
-                        onChange={(e) => { const v = Math.max(0, Number(e.target.value)); const next = [...products]; next[idx] = { ...p, stock: v }; saveInventory(next); }}
-                        className="w-24 rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"/>
+                      <input
+                        type="number"
+                        value={p.stock}
+                        min={0}
+                        onChange={(e) => {
+                          const v = Math.max(0, Number(e.target.value));
+                          const next = [...products]; next[idx] = { ...p, stock: v };
+                          saveInventory(next);
+                        }}
+                        className="w-24 rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
+                      />
                     </td>
                     <td className="py-2 pr-2">
-                      <input type="date" value={p.expiry || ""}
-                        onChange={(e) => { const next = [...products]; next[idx] = { ...p, expiry: e.target.value || null }; saveInventory(next); }}
-                        className="rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"/>
+                      <input
+                        type="date"
+                        value={p.expiry || ""}
+                        onChange={(e) => {
+                          const next = [...products]; next[idx] = { ...p, expiry: e.target.value || null };
+                          saveInventory(next);
+                        }}
+                        className="rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"
+                      />
                     </td>
-                    <td className={`py-2 ${cls}`}>{status}</td>
+                    <td className={`py-2 pr-2 ${cls}`}>{status}</td>
+                    <td className="py-2 pr-2">
+                      <button
+                        onClick={() => handleRemoveProduct(p.id)}
+                        className="px-3 py-1.5 rounded-lg text-white bg-red-600 hover:bg-red-700"
+                        title="Remove item"
+                      >
+                        Remove
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
+
         <p className="text-xs text-slate-400 mt-2">Inventory is saved to your browser (localStorage).</p>
       </div>
     </div>
@@ -725,7 +757,7 @@ function LoginScreen({ onLogin }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-indigo-50 via-white to-white dark:from-slate-900 dark:via-slate-900 dark:to-slate-950">
       <form onSubmit={submit} className="w-full max-w-sm rounded-2xl p-6 bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 shadow-xl">
-        <h1 className="text-xl font-semibold mb-4">MNL Coffee Supplies Login</h1>
+        <h1 className="text-xl font-semibold mb-4">MNL Coffee Supplies — Login</h1>
         <div className="space-y-3">
           <input value={username} onChange={(e)=>setUsername(e.target.value)} placeholder="Username"
             className="w-full rounded-xl px-3 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700"/>
