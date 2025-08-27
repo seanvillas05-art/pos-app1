@@ -5,6 +5,12 @@ const LOW_STOCK_THRESHOLD = 5;
 const EXPIRY_SOON_DAYS = 30;
 const CURRENCY_DEFAULT = "PHP";
 
+/* ======= DEMO USERS (for real apps use a backend!) ======= */
+const USERS = [
+  { username: "admin",   password: "admin123",  role: "admin",   fullName: "Administrator" },
+  { username: "cashier", password: "cash123",   role: "cashier", fullName: "Cashier" },
+];
+
 /* ===================== HELPERS ===================== */
 const currencyFormatter = (code) =>
   new Intl.NumberFormat("en-PH", { style: "currency", currency: code });
@@ -36,9 +42,10 @@ const sampleProducts = [
 ];
 
 /* ===================== STORAGE KEYS ===================== */
-const SETTINGS_KEY = "pos_settings";
+const SETTINGS_KEY  = "pos_settings";
 const INVENTORY_KEY = "pos_inventory";
-const THEME_KEY = "pos_theme";
+const THEME_KEY     = "pos_theme";
+const AUTH_KEY      = "pos_auth";
 
 /* ===================== UI ATOMS ===================== */
 const Badge = ({ tone = "slate", children }) => (
@@ -60,7 +67,23 @@ const Row = ({ label, value, bold }) => (
 
 /* ===================== MAIN ===================== */
 export default function POSApp() {
-  /* Theme (light / dark) */
+  /* ---------- Auth ---------- */
+  const [user, setUser] = useState(null); // {username, role, fullName}
+  useEffect(() => {
+    const saved = localStorage.getItem(AUTH_KEY);
+    if (saved) setUser(JSON.parse(saved));
+  }, []);
+  const login = (username, password) => {
+    const u = USERS.find(x => x.username === username && x.password === password);
+    if (!u) return { ok:false, msg:"Invalid username or password" };
+    const payload = { username: u.username, role: u.role, fullName: u.fullName };
+    setUser(payload);
+    localStorage.setItem(AUTH_KEY, JSON.stringify(payload));
+    return { ok:true };
+  };
+  const logout = () => { setUser(null); localStorage.removeItem(AUTH_KEY); };
+
+  /* ---------- Theme ---------- */
   const [theme, setTheme] = useState("light");
   useEffect(() => {
     const saved = localStorage.getItem(THEME_KEY) || "light";
@@ -74,12 +97,12 @@ export default function POSApp() {
     document.documentElement.classList.toggle("dark", next === "dark");
   };
 
-  /* Settings */
+  /* ---------- Settings ---------- */
   const [taxRate, setTaxRate] = useState(12);
   const [discountPct, setDiscountPct] = useState(0);
   const [currency, setCurrency] = useState(CURRENCY_DEFAULT);
 
-  /* Inventory (persisted) */
+  /* ---------- Inventory (persisted) ---------- */
   const [products, setProducts] = useState(sampleProducts);
   useEffect(() => {
     try {
@@ -101,7 +124,7 @@ export default function POSApp() {
     localStorage.setItem(INVENTORY_KEY, JSON.stringify(list));
   };
 
-  /* Filters */
+  /* ---------- Filters ---------- */
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
   const categories = useMemo(
@@ -117,7 +140,7 @@ export default function POSApp() {
     });
   }, [query, category, products]);
 
-  /* Cart */
+  /* ---------- Cart ---------- */
   const [cart, setCart] = useState([]);
   const addToCart = (prod) => {
     if (isExpired(prod.expiry)) return alert(`"${prod.name}" is EXPIRED and cannot be sold.`);
@@ -138,7 +161,7 @@ export default function POSApp() {
   const removeFromCart = (id) => setCart((c) => c.filter((x) => x.id !== id));
   const clearCart = () => setCart([]);
 
-  /* Totals */
+  /* ---------- Totals ---------- */
   const { subtotal, discountAmt, taxAmt, grandTotal } = useMemo(() => {
     const sub = cart.reduce((acc, x) => acc + x.price * x.qty, 0);
     const d = (sub * (Number(discountPct) || 0)) / 100;
@@ -147,7 +170,7 @@ export default function POSApp() {
     return { subtotal: sub, discountAmt: d, taxAmt: t, grandTotal: txbl + t };
   }, [cart, taxRate, discountPct]);
 
-  /* Payment */
+  /* ---------- Payment ---------- */
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [cashGiven, setCashGiven] = useState(0);
   const change = useMemo(() => {
@@ -156,7 +179,7 @@ export default function POSApp() {
     return Math.max(0, Math.round(cg * 100) / 100);
   }, [cashGiven, grandTotal, paymentMethod]);
 
-  /* Quick add */
+  /* ---------- Quick add ---------- */
   const scannerRef = useRef(null);
   const handleScan = (e) => {
     e.preventDefault();
@@ -167,10 +190,11 @@ export default function POSApp() {
     scannerRef.current.value = "";
   };
 
-  /* Checkout + receipt */
+  /* ---------- Checkout + Receipt ---------- */
   const [showCheckout, setShowCheckout] = useState(false);
   const [lastReceipt, setLastReceipt] = useState(null);
   const receiptRef = useRef(null);
+
   const canCheckout =
     cart.length > 0 &&
     cart.every((item) => {
@@ -180,12 +204,17 @@ export default function POSApp() {
     (paymentMethod !== "Cash" || Number(cashGiven) >= grandTotal);
 
   const completeSale = () => {
+    // 1) Deduct from inventory (NEVER below 0)
     const next = products.map((p) => {
       const item = cart.find((c) => c.id === p.id);
       if (!item) return p;
-      return { ...p, stock: p.stock - item.qty };
+      const newStock = Math.max(0, (Number(p.stock) || 0) - (Number(item.qty) || 0));
+      return { ...p, stock: newStock };
     });
-    saveInventory(next);
+    // Update state + persist immediately
+    saveInventory(next);            // <-- ensures Inventory tab shows the deduction right away
+
+    // 2) Build receipt
     const receipt = {
       id: `OR-${Date.now()}`,
       time: nowStr(),
@@ -200,11 +229,16 @@ export default function POSApp() {
       cashGiven: paymentMethod === "Cash" ? Number(cashGiven) : null,
       change: paymentMethod === "Cash" ? change : null,
       currency,
+      cashier: user?.fullName || "—",
     };
+
+    // 3) Reset cart & show receipt
     setLastReceipt(receipt);
     setShowCheckout(false);
     clearCart();
     setCashGiven(0);
+
+    // 4) Print (optional)
     setTimeout(() => printReceipt(), 40);
   };
 
@@ -225,13 +259,20 @@ export default function POSApp() {
     w.print();
   };
 
-  /* Warnings (for banners) */
+  /* ---------- Warnings ---------- */
   const lowStock = useMemo(() => products.filter((p) => p.stock <= LOW_STOCK_THRESHOLD), [products]);
   const expiringSoon = useMemo(() => products.filter((p) => isExpiringSoon(p.expiry)), [products]);
   const expired = useMemo(() => products.filter((p) => isExpired(p.expiry)), [products]);
 
-  /* Views */
+  /* ---------- Views ---------- */
   const [view, setView] = useState("pos");
+
+  /* ---------- If not logged in, show login screen ---------- */
+  if (!user) {
+    return <LoginScreen onLogin={login} />;
+  }
+
+  const isAdmin = user.role === "admin";
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-indigo-50 via-white to-white dark:from-slate-900 dark:via-slate-900 dark:to-slate-950 text-slate-800 dark:text-slate-100">
@@ -262,21 +303,33 @@ export default function POSApp() {
               </select>
             </div>
 
+            {/* Tabs */}
             <div className="ml-2 flex gap-1 rounded-xl p-1 bg-slate-100/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700">
               <button onClick={() => setView("pos")}
                 className={`px-3 py-1 rounded-lg text-sm transition ${view === "pos" ? "bg-white dark:bg-slate-700 shadow" : "hover:bg-white/60 dark:hover:bg-slate-700/60"}`}>
                 POS
               </button>
-              <button onClick={() => setView("inventory")}
-                className={`px-3 py-1 rounded-lg text-sm transition ${view === "inventory" ? "bg-white dark:bg-slate-700 shadow" : "hover:bg-white/60 dark:hover:bg-slate-700/60"}`}>
+              <button
+                onClick={() => isAdmin && setView("inventory")}
+                disabled={!isAdmin}
+                className={`px-3 py-1 rounded-lg text-sm transition ${view === "inventory" ? "bg-white dark:bg-slate-700 shadow" : "hover:bg-white/60 dark:hover:bg-slate-700/60"} ${!isAdmin ? "opacity-50 cursor-not-allowed" : ""}`}>
                 Inventory
               </button>
             </div>
 
-            <button onClick={toggleTheme}
-              className="ml-2 px-3 py-1 rounded-xl text-sm bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 transition">
-              {theme === "light" ? "Dark" : "Light"}
-            </button>
+            {/* User + Theme */}
+            <div className="ml-2 flex items-center gap-2">
+              <button onClick={toggleTheme}
+                className="px-3 py-1 rounded-xl text-sm bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 hover:bg-white dark:hover:bg-slate-700 transition">
+                {theme === "light" ? "Dark" : "Light"}
+              </button>
+              <div className="text-xs px-2 py-1 rounded-lg bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                {user.fullName} • {user.role}
+              </div>
+              <button onClick={logout} className="px-3 py-1 rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-white/70 dark:hover:bg-slate-800/70">
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -303,242 +356,38 @@ export default function POSApp() {
 
       {/* ======= MAIN ======= */}
       {view === "pos" ? (
-        <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Catalog */}
-          <div className="lg:col-span-2">
-            <div className="mb-3 grid sm:grid-cols-3 gap-2">
-              <form onSubmit={(e) => e.preventDefault()} className="sm:col-span-2">
-                <input
-                  type="text"
-                  placeholder="Search by name, ID, or SKU…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  className="w-full rounded-2xl px-4 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500/40"
-                />
-              </form>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="rounded-2xl px-4 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700"
-              >
-                {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-
-            <div className="mb-3">
-              <form onSubmit={handleScan} className="flex items-center gap-2">
-                <input
-                  ref={scannerRef}
-                  type="text"
-                  placeholder="Quick add via SKU/ID (press Enter)"
-                  className="w-full rounded-2xl px-4 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500/40"
-                />
-                <button className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm hover:scale-[1.02] active:scale-[0.99] transition dark:bg-slate-100 dark:text-slate-900">
-                  Add
-                </button>
-              </form>
-            </div>
-
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {filtered.map((p) => {
-                const badge =
-                  isExpired(p.expiry) ? "Expired" :
-                  p.stock <= LOW_STOCK_THRESHOLD ? "Low stock" :
-                  isExpiringSoon(p.expiry) ? `Expiring ${daysUntil(p.expiry)}d` : null;
-                const tone =
-                  isExpired(p.expiry) ? "red" :
-                  p.stock <= LOW_STOCK_THRESHOLD ? "yellow" :
-                  isExpiringSoon(p.expiry) ? "amber" : "slate";
-
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => addToCart(p)}
-                    disabled={isExpired(p.expiry)}
-                    className={`group text-left rounded-2xl p-3 border bg-white/70 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:shadow-lg hover:bg-white dark:hover:bg-slate-800 transition 
-                      ${isExpired(p.expiry) ? "opacity-60 cursor-not-allowed" : ""}`}
-                    title={isExpired(p.expiry) ? "Expired – cannot sell" : "Add to cart"}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">{p.category}</span>
-                      {badge && <Badge tone={tone}>{badge}</Badge>}
-                    </div>
-                    <div className="h-24 rounded-xl bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-600 mb-3 group-hover:scale-[1.01] transition" />
-                    <div className="text-sm font-medium leading-tight line-clamp-2">{p.name}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">Stock: {p.stock} • Exp: {p.expiry || "—"}</div>
-                    <div className="mt-2 font-semibold">{fmt(p.price, currency)}</div>
-                    <div className="text-[10px] text-slate-400 mt-1">ID: {p.id} • SKU: {p.sku}</div>
-                  </button>
-                );
-              })}
-              {filtered.length === 0 && (
-                <div className="col-span-full text-center text-slate-500 dark:text-slate-400 py-8">No products found.</div>
-              )}
-            </div>
-          </div>
-
-          {/* Cart */}
-          <div className="lg:col-span-1">
-            <div className="rounded-2xl p-4 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 sticky top-24 shadow-lg shadow-indigo-500/5">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="font-semibold">Cart ({cart.reduce((a, x) => a + x.qty, 0)})</h2>
-                <button onClick={clearCart} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-200">Clear</button>
-              </div>
-
-              <div className="space-y-3 max-h-[52vh] overflow-auto pr-1">
-                {cart.map((item) => {
-                  const prod = products.find((p) => p.id === item.id);
-                  const max = prod?.stock ?? item.qty;
-                  return (
-                    <div key={item.id} className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 dark:from-slate-700 dark:to-slate-600" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium leading-tight">{item.name}</div>
-                        <div className="text-xs text-slate-500 dark:text-slate-400">{fmt(item.price, currency)} each</div>
-                        <div className="mt-1 flex items-center gap-2">
-                          <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
-                            <button onClick={() => updateQty(item.id, item.qty - 1)} className="px-2 py-1 text-sm">−</button>
-                            <input
-                              type="number"
-                              value={item.qty}
-                              onChange={(e) => updateQty(item.id, Number(e.target.value))}
-                              className="w-12 text-center text-sm py-1 bg-transparent"
-                              min={1}
-                              max={max}
-                            />
-                            <button onClick={() => updateQty(item.id, item.qty + 1)} className="px-2 py-1 text-sm">+</button>
-                          </div>
-                          <div className="ml-auto font-semibold">{fmt(item.price * item.qty, currency)}</div>
-                        </div>
-                        {prod && prod.stock <= LOW_STOCK_THRESHOLD && (
-                          <div className="text-[11px] text-amber-600 dark:text-amber-300 mt-1">Low stock (left: {prod.stock})</div>
-                        )}
-                      </div>
-                      <button onClick={() => removeFromCart(item.id)} className="text-slate-400 hover:text-red-500">✕</button>
-                    </div>
-                  );
-                })}
-
-                {cart.length === 0 && (
-                  <div className="text-center text-slate-500 dark:text-slate-400 py-8">Your cart is empty.</div>
-                )}
-              </div>
-
-              <div className="my-4 border-t border-slate-200 dark:border-slate-700 pt-3 space-y-1 text-sm">
-                <Row label="Subtotal" value={fmt(subtotal, currency)} />
-                <Row label={`Discount (${discountPct || 0}%)`} value={`− ${fmt(discountAmt, currency)}`} />
-                <Row label={`Tax (${taxRate || 0}%)`} value={fmt(taxAmt, currency)} />
-                <Row label="Total" value={fmt(grandTotal, currency)} bold />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center gap-2 text-sm">
-                  <label className="text-slate-600 dark:text-slate-300">Payment:</label>
-                  <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}
-                    className="rounded-xl px-3 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
-                    <option>Cash</option><option>Card</option><option>E-Wallet</option>
-                  </select>
-                </div>
-                {paymentMethod === "Cash" && (
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div>
-                      <label className="block text-slate-500 dark:text-slate-400 mb-1">Cash Given</label>
-                      <input type="number" value={cashGiven} onChange={(e) => setCashGiven(e.target.value)}
-                        className="w-full rounded-xl px-3 py-2 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700" min={0}/>
-                    </div>
-                    <div>
-                      <label className="block text-slate-500 dark:text-slate-400 mb-1">Change</label>
-                      <div className="w-full rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">{fmt(change, currency)}</div>
-                    </div>
-                  </div>
-                )}
-
-                <button
-                  onClick={() => setShowCheckout(true)}
-                  disabled={!canCheckout}
-                  className={`w-full mt-2 px-4 py-3 rounded-2xl text-white font-medium shadow-lg shadow-indigo-500/20 
-                    transition hover:scale-[1.01] active:scale-[0.99]
-                    ${canCheckout ? "bg-gradient-to-r from-indigo-600 to-violet-600" : "bg-slate-400 cursor-not-allowed"}`}
-                >
-                  Proceed to Checkout
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <POSView
+          products={products}
+          categories={categories}
+          filtered={filtered}
+          query={query}
+          setQuery={setQuery}
+          category={category}
+          setCategory={setCategory}
+          addToCart={addToCart}
+          scannerRef={scannerRef}
+          handleScan={handleScan}
+          cart={cart}
+          updateQty={updateQty}
+          removeFromCart={removeFromCart}
+          clearCart={clearCart}
+          subtotal={subtotal}
+          discountPct={discountPct}
+          discountAmt={discountAmt}
+          taxRate={taxRate}
+          taxAmt={taxAmt}
+          grandTotal={grandTotal}
+          currency={currency}
+          paymentMethod={paymentMethod}
+          setPaymentMethod={setPaymentMethod}
+          cashGiven={cashGiven}
+          setCashGiven={setCashGiven}
+          change={change}
+          canCheckout={canCheckout}
+          setShowCheckout={setShowCheckout}
+        />
       ) : (
-        /* ======= INVENTORY VIEW ======= */
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <div className="rounded-2xl p-4 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 shadow-lg shadow-indigo-500/5">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <h2 className="font-semibold">Inventory Monitor</h2>
-                <Badge tone="indigo">{products.length} items</Badge>
-              </div>
-              <button
-                onClick={() => saveInventory([...products])}
-                className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/70 hover:bg-white dark:hover:bg-slate-800 transition"
-              >
-                Save
-              </button>
-            </div>
-            <div className="overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="text-left text-slate-500 dark:text-slate-400">
-                  <tr>
-                    <th className="py-2 pr-2">ID / SKU</th>
-                    <th className="py-2 pr-2">Name</th>
-                    <th className="py-2 pr-2">Category</th>
-                    <th className="py-2 pr-2">Price</th>
-                    <th className="py-2 pr-2">Stock</th>
-                    <th className="py-2 pr-2">Expiry</th>
-                    <th className="py-2">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.map((p, idx) => {
-                    const status = isExpired(p.expiry)
-                      ? "Expired"
-                      : isExpiringSoon(p.expiry)
-                      ? `Expiring (${daysUntil(p.expiry)}d)`
-                      : p.stock <= LOW_STOCK_THRESHOLD
-                      ? "Low stock"
-                      : "OK";
-                    const cls =
-                      status === "Expired" ? "text-red-600 dark:text-red-300" :
-                      status.startsWith("Expiring") ? "text-amber-700 dark:text-amber-300" :
-                      status === "Low stock" ? "text-yellow-700 dark:text-yellow-300" :
-                      "text-slate-500 dark:text-slate-400";
-                    return (
-                      <tr key={p.id} className="border-t border-slate-200 dark:border-slate-700">
-                        <td className="py-2 pr-2">{p.id}<div className="text-[11px] text-slate-400">SKU: {p.sku}</div></td>
-                        <td className="py-2 pr-2">{p.name}</td>
-                        <td className="py-2 pr-2">{p.category}</td>
-                        <td className="py-2 pr-2">
-                          <input type="number" value={p.price} min={0}
-                            onChange={(e) => { const v = Number(e.target.value); const next = [...products]; next[idx] = { ...p, price: v }; saveInventory(next); }}
-                            className="w-24 rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"/>
-                        </td>
-                        <td className="py-2 pr-2">
-                          <input type="number" value={p.stock} min={0}
-                            onChange={(e) => { const v = Math.max(0, Number(e.target.value)); const next = [...products]; next[idx] = { ...p, stock: v }; saveInventory(next); }}
-                            className="w-24 rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"/>
-                        </td>
-                        <td className="py-2 pr-2">
-                          <input type="date" value={p.expiry || ""}
-                            onChange={(e) => { const next = [...products]; next[idx] = { ...p, expiry: e.target.value || null }; saveInventory(next); }}
-                            className="rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"/>
-                        </td>
-                        <td className={`py-2 ${cls}`}>{status}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs text-slate-400 mt-2">Inventory is saved to your browser (localStorage).</p>
-          </div>
-        </div>
+        <InventoryView products={products} saveInventory={saveInventory} />
       )}
 
       {/* ======= CHECKOUT MODAL ======= */}
@@ -583,6 +432,7 @@ export default function POSApp() {
             <hr />
             <div className="muted">OR: {lastReceipt.id}</div>
             <div className="muted">Date: {lastReceipt.time}</div>
+            <div className="muted">Cashier: {lastReceipt.cashier}</div>
             <hr />
             <table><tbody>
               {lastReceipt.items.map((it) => (
@@ -612,6 +462,284 @@ export default function POSApp() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ===================== SUB-VIEWS ===================== */
+function POSView(props) {
+  const {
+    products, categories, filtered, query, setQuery, category, setCategory,
+    addToCart, scannerRef, handleScan, cart, updateQty, removeFromCart, clearCart,
+    subtotal, discountPct, discountAmt, taxRate, taxAmt, grandTotal, currency,
+    paymentMethod, setPaymentMethod, cashGiven, setCashGiven, change, canCheckout, setShowCheckout
+  } = props;
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Catalog */}
+      <div className="lg:col-span-2">
+        <div className="mb-3 grid sm:grid-cols-3 gap-2">
+          <form onSubmit={(e) => e.preventDefault()} className="sm:col-span-2">
+            <input
+              type="text"
+              placeholder="Search by name, ID, or SKU…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full rounded-2xl px-4 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500/40"
+            />
+          </form>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="rounded-2xl px-4 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700"
+          >
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </div>
+
+        <div className="mb-3">
+          <form onSubmit={handleScan} className="flex items-center gap-2">
+            <input
+              ref={scannerRef}
+              type="text"
+              placeholder="Quick add via SKU/ID (press Enter)"
+              className="w-full rounded-2xl px-4 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:focus:ring-indigo-500/40"
+            />
+            <button className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm hover:scale-[1.02] active:scale-[0.99] transition dark:bg-slate-100 dark:text-slate-900">
+              Add
+            </button>
+          </form>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
+          {filtered.map((p) => {
+            const badge =
+              isExpired(p.expiry) ? "Expired" :
+              p.stock <= LOW_STOCK_THRESHOLD ? "Low stock" :
+              isExpiringSoon(p.expiry) ? `Expiring ${daysUntil(p.expiry)}d` : null;
+            const tone =
+              isExpired(p.expiry) ? "red" :
+              p.stock <= LOW_STOCK_THRESHOLD ? "yellow" :
+              isExpiringSoon(p.expiry) ? "amber" : "slate";
+
+            return (
+              <button
+                key={p.id}
+                onClick={() => addToCart(p)}
+                disabled={isExpired(p.expiry)}
+                className={`group text-left rounded-2xl p-3 border bg-white/70 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700 hover:shadow-lg hover:bg-white dark:hover:bg-slate-800 transition 
+                  ${isExpired(p.expiry) ? "opacity-60 cursor-not-allowed" : ""}`}
+                title={isExpired(p.expiry) ? "Expired – cannot sell" : "Add to cart"}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-slate-500 dark:text-slate-400">{p.category}</span>
+                  {badge && <Badge tone={tone}>{badge}</Badge>}
+                </div>
+                <div className="h-24 rounded-xl bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-700 dark:to-slate-600 mb-3 group-hover:scale-[1.01] transition" />
+                <div className="text-sm font-medium leading-tight line-clamp-2">{p.name}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">Stock: {p.stock} • Exp: {p.expiry || "—"}</div>
+                <div className="mt-2 font-semibold">{fmt(p.price, currency)}</div>
+                <div className="text-[10px] text-slate-400 mt-1">ID: {p.id} • SKU: {p.sku}</div>
+              </button>
+            );
+          })}
+          {filtered.length === 0 && (
+            <div className="col-span-full text-center text-slate-500 dark:text-slate-400 py-8">No products found.</div>
+          )}
+        </div>
+      </div>
+
+      {/* Cart */}
+      <div className="lg:col-span-1">
+        <div className="rounded-2xl p-4 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 sticky top-24 shadow-lg shadow-indigo-500/5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold">Cart ({cart.reduce((a, x) => a + x.qty, 0)})</h2>
+            <button onClick={clearCart} className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-200">Clear</button>
+          </div>
+
+          <div className="space-y-3 max-h-[52vh] overflow-auto pr-1">
+            {cart.map((item) => (
+              <div key={item.id} className="flex items-start gap-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 dark:from-slate-700 dark:to-slate-600" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium leading-tight">{item.name}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">{fmt(item.price, currency)} each</div>
+                  <div className="mt-1 flex items-center gap-2">
+                    <div className="flex items-center border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden">
+                      <button onClick={() => updateQty(item.id, item.qty - 1)} className="px-2 py-1 text-sm">−</button>
+                      <input
+                        type="number"
+                        value={item.qty}
+                        onChange={(e) => updateQty(item.id, Number(e.target.value))}
+                        className="w-12 text-center text-sm py-1 bg-transparent"
+                        min={1}
+                      />
+                      <button onClick={() => updateQty(item.id, item.qty + 1)} className="px-2 py-1 text-sm">+</button>
+                    </div>
+                    <div className="ml-auto font-semibold">{fmt(item.price * item.qty, currency)}</div>
+                  </div>
+                </div>
+                <button onClick={() => removeFromCart(item.id)} className="text-slate-400 hover:text-red-500">✕</button>
+              </div>
+            ))}
+
+            {cart.length === 0 && (
+              <div className="text-center text-slate-500 dark:text-slate-400 py-8">Your cart is empty.</div>
+            )}
+          </div>
+
+          <div className="my-4 border-t border-slate-200 dark:border-slate-700 pt-3 space-y-1 text-sm">
+            <Row label="Subtotal" value={fmt(subtotal, currency)} />
+            <Row label={`Discount (${discountPct || 0}%)`} value={`− ${fmt(discountAmt, currency)}`} />
+            <Row label={`Tax (${taxRate || 0}%)`} value={fmt(taxAmt, currency)} />
+            <Row label="Total" value={fmt(grandTotal, currency)} bold />
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm">
+              <label className="text-slate-600 dark:text-slate-300">Payment:</label>
+              <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}
+                className="rounded-xl px-3 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+                <option>Cash</option><option>Card</option><option>E-Wallet</option>
+              </select>
+            </div>
+            {paymentMethod === "Cash" && (
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div>
+                  <label className="block text-slate-500 dark:text-slate-400 mb-1">Cash Given</label>
+                  <input type="number" value={cashGiven} onChange={(e) => setCashGiven(e.target.value)}
+                    className="w-full rounded-xl px-3 py-2 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700" min={0}/>
+                </div>
+                <div>
+                  <label className="block text-slate-500 dark:text-slate-400 mb-1">Change</label>
+                  <div className="w-full rounded-xl px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">{fmt(change, currency)}</div>
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowCheckout(true)}
+              disabled={!canCheckout}
+              className={`w-full mt-2 px-4 py-3 rounded-2xl text-white font-medium shadow-lg shadow-indigo-500/20 
+                transition hover:scale-[1.01] active:scale-[0.99]
+                ${canCheckout ? "bg-gradient-to-r from-indigo-600 to-violet-600" : "bg-slate-400 cursor-not-allowed"}`}
+            >
+              Proceed to Checkout
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InventoryView({ products, saveInventory }) {
+  return (
+    <div className="max-w-7xl mx-auto px-4 py-6">
+      <div className="rounded-2xl p-4 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700 shadow-lg shadow-indigo-500/5">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <h2 className="font-semibold">Inventory Monitor</h2>
+            <Badge tone="indigo">{products.length} items</Badge>
+          </div>
+          <button
+            onClick={() => saveInventory([...products])}
+            className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-800/70 hover:bg-white dark:hover:bg-slate-800 transition"
+          >
+            Save
+          </button>
+        </div>
+        <div className="overflow-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-slate-500 dark:text-slate-400">
+              <tr>
+                <th className="py-2 pr-2">ID / SKU</th>
+                <th className="py-2 pr-2">Name</th>
+                <th className="py-2 pr-2">Category</th>
+                <th className="py-2 pr-2">Price</th>
+                <th className="py-2 pr-2">Stock</th>
+                <th className="py-2 pr-2">Expiry</th>
+                <th className="py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {products.map((p, idx) => {
+                const status = isExpired(p.expiry)
+                  ? "Expired"
+                  : isExpiringSoon(p.expiry)
+                  ? `Expiring (${daysUntil(p.expiry)}d)`
+                  : p.stock <= LOW_STOCK_THRESHOLD
+                  ? "Low stock"
+                  : "OK";
+                const cls =
+                  status === "Expired" ? "text-red-600 dark:text-red-300" :
+                  status.startsWith("Expiring") ? "text-amber-700 dark:text-amber-300" :
+                  status === "Low stock" ? "text-yellow-700 dark:text-yellow-300" :
+                  "text-slate-500 dark:text-slate-400";
+                return (
+                  <tr key={p.id} className="border-t border-slate-200 dark:border-slate-700">
+                    <td className="py-2 pr-2">{p.id}<div className="text-[11px] text-slate-400">SKU: {p.sku}</div></td>
+                    <td className="py-2 pr-2">{p.name}</td>
+                    <td className="py-2 pr-2">{p.category}</td>
+                    <td className="py-2 pr-2">
+                      <input type="number" value={p.price} min={0}
+                        onChange={(e) => { const v = Number(e.target.value); const next = [...products]; next[idx] = { ...p, price: v }; saveInventory(next); }}
+                        className="w-24 rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"/>
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input type="number" value={p.stock} min={0}
+                        onChange={(e) => { const v = Math.max(0, Number(e.target.value)); const next = [...products]; next[idx] = { ...p, stock: v }; saveInventory(next); }}
+                        className="w-24 rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"/>
+                    </td>
+                    <td className="py-2 pr-2">
+                      <input type="date" value={p.expiry || ""}
+                        onChange={(e) => { const next = [...products]; next[idx] = { ...p, expiry: e.target.value || null }; saveInventory(next); }}
+                        className="rounded-lg px-2 py-1 bg-white/60 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700"/>
+                    </td>
+                    <td className={`py-2 ${cls}`}>{status}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-xs text-slate-400 mt-2">Inventory is saved to your browser (localStorage).</p>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Login Screen ---------- */
+function LoginScreen({ onLogin }) {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [err, setErr] = useState("");
+
+  const submit = (e) => {
+    e.preventDefault();
+    const res = onLogin(username.trim(), password);
+    if (!res.ok) setErr(res.msg);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-indigo-50 via-white to-white dark:from-slate-900 dark:via-slate-900 dark:to-slate-950">
+      <form onSubmit={submit} className="w-full max-w-sm rounded-2xl p-6 bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 shadow-xl">
+        <h1 className="text-xl font-semibold mb-4">NovaPOS Login</h1>
+        <div className="space-y-3">
+          <input value={username} onChange={(e)=>setUsername(e.target.value)} placeholder="Username"
+            className="w-full rounded-xl px-3 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700"/>
+          <input value={password} onChange={(e)=>setPassword(e.target.value)} type="password" placeholder="Password"
+            className="w-full rounded-xl px-3 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700"/>
+          {err && <div className="text-sm text-red-600">{err}</div>}
+          <button className="w-full mt-2 px-4 py-2 rounded-xl text-white bg-gradient-to-r from-indigo-600 to-violet-600">
+            Sign in
+          </button>
+        </div>
+        <div className="text-[11px] text-slate-500 mt-4">
+          Demo users — Admin: <b>admin / admin123</b>, Cashier: <b>cashier / cash123</b>
+        </div>
+      </form>
     </div>
   );
 }
