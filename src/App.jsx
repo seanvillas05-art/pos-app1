@@ -282,7 +282,7 @@ export default function POSApp() {
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-500/20" />
             <div>
-              <h1 className="text-lg font-semibold tracking-tight">NovaPOS</h1>
+              <h1 className="text-lg font-semibold tracking-tight">MNL Coffee Supplies</h1>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 {currency} • VAT {taxRate}% • Low ≤ {LOW_STOCK_THRESHOLD} • Expiry ≤ {EXPIRY_SOON_DAYS}d
               </p>
@@ -425,7 +425,7 @@ export default function POSApp() {
         {lastReceipt && (
           <div className="max-w-sm mx-auto" ref={receiptRef}>
             <div className="center">
-              <div style={{ fontSize: 16, fontWeight: 700 }}>NOVAPOS RECEIPT</div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>MNL Coffee Supplies RECEIPT</div>
               <div className="muted">123 Demo St., Metro Manila</div>
               <div className="muted">TIN: 000-000-000-00000</div>
             </div>
@@ -725,7 +725,7 @@ function LoginScreen({ onLogin }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-indigo-50 via-white to-white dark:from-slate-900 dark:via-slate-900 dark:to-slate-950">
       <form onSubmit={submit} className="w-full max-w-sm rounded-2xl p-6 bg-white/80 dark:bg-slate-900/80 border border-slate-200 dark:border-slate-700 shadow-xl">
-        <h1 className="text-xl font-semibold mb-4">NovaPOS Login</h1>
+        <h1 className="text-xl font-semibold mb-4">MNL Coffee Supplies Login</h1>
         <div className="space-y-3">
           <input value={username} onChange={(e)=>setUsername(e.target.value)} placeholder="Username"
             className="w-full rounded-xl px-3 py-2 bg-white/70 dark:bg-slate-800/70 border border-slate-200 dark:border-slate-700"/>
