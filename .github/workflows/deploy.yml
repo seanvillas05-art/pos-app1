@@ -23,7 +23,7 @@ jobs:
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: ./dist   # ✅ must match Vite’s output
 
   deploy:
     needs: build
