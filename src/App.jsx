@@ -627,11 +627,45 @@ function POSView(props) {
   );
 }
 
+import { useState } from "react"; // make sure this import exists at the file top
+
 function InventoryView({ products, saveInventory }) {
+  const [newItem, setNewItem] = useState({
+    id: "",
+    sku: "",
+    name: "",
+    category: "",
+    price: 0,
+    stock: 0,
+    expiry: "",
+  });
+
   const handleRemoveProduct = (id) => {
     if (!confirm("Remove this item from inventory?")) return;
-    const next = products.filter(p => p.id !== id);
+    const next = products.filter((p) => p.id !== id);
     saveInventory(next);
+  };
+
+  // Generate a simple ID/SKU if the user leaves them blank
+  const genId = (category) => {
+    const prefix = (category || "GEN").slice(0, 3).toUpperCase();
+    // find next number not used
+    const n = String(products.length + 1).padStart(3, "0");
+    return `${prefix}-${n}`;
+  };
+
+  const addItem = () => {
+    if (!newItem.name.trim()) return alert("Name is required");
+    const item = {
+      ...newItem,
+      id: newItem.id.trim() || genId(newItem.category),
+      sku: newItem.sku.trim() || Date.now().toString().slice(-12),
+      price: Number(newItem.price) || 0,
+      stock: Number(newItem.stock) || 0,
+      expiry: newItem.expiry || null,
+    };
+    saveInventory([...products, item]);
+    setNewItem({ id: "", sku: "", name: "", category: "", price: 0, stock: 0, expiry: "" });
   };
 
   return (
